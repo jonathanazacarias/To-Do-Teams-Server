@@ -131,7 +131,7 @@ app.post("/login", async (req, res) => {
         res.send(user);
       });
     } else {
-      res.send(null);
+      res.sendStatus(404);
     }
   })(req, res);
 });
@@ -153,6 +153,24 @@ app.post("/logout", (req, res) => {
       });
     });
 });
+
+app.post("/lists", (req, res) => {
+  if(req.isAuthenticated) {
+    // will need to add list to database
+    listsList.push(req.body);
+    res.sendStatus(200);
+  }else {
+    res.sendStatus(403);
+  }
+})
+
+app.post("/list/:listId", (req, res) => {
+  if(req.isAuthenticated()) {
+    // const updatedList = req.
+    let index = listsList.findIndex((list) => list.id === updatedList.id);
+    listsList.splice(index, 1, updatedList);
+  }
+})
 
 passport.use(
   "local",
@@ -181,8 +199,8 @@ passport.use(
       //   }
       let user = {
         userId: "654321",
-        email: "test@test.com",
         username: "Test",
+        avatar: "Test avatar"
       };
 
       if (password == 1) {
