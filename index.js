@@ -119,6 +119,12 @@ app.get("/lists", async (req, res) => {
     }
 })
 
+app.get("/lists/:listId", (req, res) => {
+  const id = req.params.listId;
+  let list = listsList.filter((list) => list.id === id);
+  res.send(list[0]);
+})
+
 app.post("/login", async (req, res) => {
   console.log(req.body);
   
@@ -158,17 +164,21 @@ app.post("/lists", (req, res) => {
   if(req.isAuthenticated) {
     // will need to add list to database
     listsList.push(req.body);
+    console.log(listsList);
     res.sendStatus(200);
   }else {
     res.sendStatus(403);
   }
 })
 
-app.post("/list/:listId", (req, res) => {
+app.put("/list/:listId", (req, res) => {
   if(req.isAuthenticated()) {
-    // const updatedList = req.
+    const updatedList = req.body;
     let index = listsList.findIndex((list) => list.id === updatedList.id);
     listsList.splice(index, 1, updatedList);
+    res.sendStatus(200);
+  }else {
+    res.sendStatus(403);
   }
 })
 
