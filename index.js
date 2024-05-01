@@ -8,7 +8,6 @@ import session from "express-session";
 import env from "dotenv";
 import cors from "cors";
 
-
 const listsList = [
   {
     id: "1",
@@ -66,7 +65,6 @@ const listsList = [
   },
 ];
 
-
 const app = express();
 const port = 3000;
 const saltRounds = 10;
@@ -110,28 +108,27 @@ app.get("/", (req, res) => {
 });
 
 app.get("/lists", async (req, res) => {
-    
-    console.log(req.session);
-    if(req.isAuthenticated()) {
-        res.send(listsList);
-    }else{
-        res.sendStatus(403);
-    }
-})
+  if (req.isAuthenticated()) {
+    const userId = req.user.id;
+    const usersLists = await db.query(
+      "SELECT * FROM lists WHERE list_owner_id = $1",
+      [userId]
+    );
+    res.send(usersLists.rows);
+  } else {
+    res.sendStatus(403);
+  }
+});
 
 app.get("/lists/:listId", (req, res) => {
   const id = req.params.listId;
   let list = listsList.filter((list) => list.id === id);
   res.send(list[0]);
-})
+});
 
 app.post("/login", async (req, res) => {
-  console.log(req.body);
-  
   passport.authenticate("local", function (err, user, info, status) {
-    
     if (user) {
-      
       req.login(user, (err) => {
         console.log(err);
         res.send(user);
@@ -143,81 +140,98 @@ app.post("/login", async (req, res) => {
 });
 
 app.post("/register", async (req, res) => {
-  console.log(req.body);
-  // create new user logic
-  res.send("Got to register!");
+  const email = req.body.email;
+  const username = req.body.username;
+  const password = req.body.password;
+
+  try {
+    const checkResult = await db.query("SELECT * FROM users WHERE email = $1", [
+      email,
+    ]);
+
+    if (checkResult.rows.length > 0) {
+      res.status(400).send("Email already exists, try loggin in.");
+    } else {
+      // hash and salt the password then save to db
+      bcrypt.hash(password, saltRounds, async (err, hash) => {
+        if (err) {
+          console.error("Error hashing password: ", err);
+        } else {
+          console.log(`Hashed password: ${hash}`);
+          const result = await db.query(
+            "INSERT INTO users (email, username, password_hash) VALUES ($1, $2, $3) RETURNING *",
+            [email, username, hash]
+          );
+          const user = result.rows[0];
+          req.login(user, (err) => {
+            console.log(err);
+            res.send(user);
+          });
+        }
+      });
+    }
+  } catch (error) {
+    res.send({ error: error }).status(500);
+  }
 });
 
 app.post("/logout", (req, res) => {
-    console.log(req.body);
-    res.clearCookie("connect.sid");
-    req.logout(function (err) {
-      console.log(err);
-      req.session.destroy(function (err) {
-        // destroys the session
-        res.send();
-      });
+  res.clearCookie("connect.sid");
+  req.logout(function (err) {
+    console.log(err);
+    req.session.destroy(function (err) {
+      // destroys the session
+      res.send();
     });
+  });
 });
 
 app.post("/lists", (req, res) => {
-  if(req.isAuthenticated) {
+  if (req.isAuthenticated) {
     // will need to add list to database
     listsList.push(req.body);
-    console.log(listsList);
     res.sendStatus(200);
-  }else {
+  } else {
     res.sendStatus(403);
   }
-})
+});
 
 app.put("/list/:listId", (req, res) => {
-  if(req.isAuthenticated()) {
+  if (req.isAuthenticated()) {
     const updatedList = req.body;
     let index = listsList.findIndex((list) => list.id === updatedList.id);
     listsList.splice(index, 1, updatedList);
     res.sendStatus(200);
-  }else {
+  } else {
     res.sendStatus(403);
   }
-})
+});
 
 passport.use(
   "local",
   new Strategy(async function verify(username, password, cb) {
     try {
-      //   const result = await db.query("SELECT * FROM users WHERE email = $1 ", [
-      //     username,
-      //   ]);
-      //   if (result.rows.length > 0) {
-      //     const user = result.rows[0];
-      //     const storedHashedPassword = user.password;
-      //     bcrypt.compare(password, storedHashedPassword, (err, valid) => {
-      //       if (err) {
-      //         console.error("Error comparing passwords:", err);
-      //         return cb(err);
-      //       } else {
-      //         if (valid) {
-      //           return cb(null, user);
-      //         } else {
-      //           return cb(null, false);
-      //         }
-      //       }
-      //     });
-      //   } else {
-      //     return cb("User not found");
-      //   }
-      let user = {
-        userId: "654321",
-        username: "Test",
-        avatar: "Test avatar"
-      };
-
-      if (password == 1) {
-        cb(null, user);
-      } else {
-        cb(null, false);
-      }
+        const result = await db.query("SELECT * FROM users WHERE email = $1 ", [
+          username,
+        ]);
+        if (result.rows.length > 0) {
+          const user = result.rows[0];
+          const storedHashedPassword = user.password_hash;
+          bcrypt.compare(password, storedHashedPassword, (err, valid) => {
+            if (err) {
+              console.error("Error comparing passwords:", err);
+              return cb(err);
+            } else {
+              if (valid) {
+                return cb(null, user);
+              } else {
+                return cb(null, false);
+              }
+            }
+          });
+        } else {
+          return cb("User not found");
+        }
     } catch (err) {
       console.log(err);
     }
