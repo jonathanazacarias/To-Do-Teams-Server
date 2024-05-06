@@ -120,10 +120,35 @@ app.get("/lists", async (req, res) => {
   }
 });
 
-app.get("/lists/:listId", (req, res) => {
-  const id = req.params.listId;
-  let list = listsList.filter((list) => list.id === id);
-  res.send(list[0]);
+app.get("/lists/:listId", async (req, res) => {
+  if (req.isAuthenticated) {
+    const id = req.params.listId;
+
+    // later convert this into one db call with a join, db is set up for it
+
+    const list = await db.query("SELECT * FROM lists WHERE id = $1", [id]);
+
+    const listItems = await db.query(
+      "SELECT * FROM list_items WHERE list_id = $1",
+      [id]
+    );
+
+    // rename list_id to listId for each item in the list
+    const renamedListItems = listItems.rows.map((item) => {
+      return {
+        id: item.id,
+        listId: item.list_id,
+        title: item.title,
+        description: item.description,
+      };
+    });
+
+    list.rows[0].items = renamedListItems;
+
+    res.status(200).send(list.rows[0]);
+  } else {
+    req.sendStatus(403);
+  }
 });
 
 app.post("/login", async (req, res) => {
@@ -188,20 +213,90 @@ app.post("/logout", (req, res) => {
 
 app.post("/lists", (req, res) => {
   if (req.isAuthenticated) {
-    // will need to add list to database
-    listsList.push(req.body);
-    res.sendStatus(200);
+    try {
+      const newList = db.query(
+        "INSERT INTO lists (id, list_owner_id, title, description, created_date, modified_date, modified_by) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [
+          req.body.id,
+          req.body.owner.id,
+          req.body.title,
+          req.body.description,
+          req.body.created,
+          req.body.modified,
+          req.body.modifiedBy.id,
+        ]
+      );
+      res.sendStatus(200);
+    } catch (error) {
+      res.sendStatus(500);
+    }
   } else {
     res.sendStatus(403);
   }
 });
 
-app.put("/list/:listId", (req, res) => {
+app.put("/lists", async (req, res) => {
   if (req.isAuthenticated()) {
-    const updatedList = req.body;
-    let index = listsList.findIndex((list) => list.id === updatedList.id);
-    listsList.splice(index, 1, updatedList);
-    res.sendStatus(200);
+    try {
+      const updatedList = req.body;
+      const id = updatedList.id;
+
+      // update the list if there is anything in the list itself to be updated
+      await db.query(
+        "UPDATE lists SET id=$1, list_owner_id=$2, title=$3, description=$4, created_date=$5, modified_date=$6, modified_by=$7 WHERE id=$8",
+        [
+          id,
+          updatedList.owner,
+          updatedList.title,
+          updatedList.description,
+          updatedList.created,
+          updatedList.modified,
+          updatedList.modifiedBy,
+          id,
+        ]
+      );
+
+      // get the old list items so that they can be compared to the items in the new list
+      const oldListItemsResponse = await db.query(
+        "SELECT * FROM list_items WHERE list_id = $1",
+        [id]
+      );
+      const oldListItems = oldListItemsResponse.rows;
+      const newListItems = updatedList.items;
+
+      // if there is a new item to add to the list, add it to the db
+      if (oldListItems.length < newListItems.length) {
+        const newItem = newListItems[newListItems.length - 1];
+        await db.query(
+          "INSERT INTO list_items (id, list_id, title, description) VALUES ($1, $2, $3, $4)",
+          [newItem.id, newItem.listId, newItem.title, newItem.description]
+        );
+      }
+
+      // if there are any modified list items, update them in the db
+      for (let i = 0; i < oldListItems.length; i++) {
+        let itemFromNew = newListItems.find(
+          (item) => item.id === oldListItems[i].id
+        );
+
+        // there should never be an item in the old list that does not exist in the new list,
+        // therefore we should always be able to find the old list item in the new list, if we
+        // dont then there way and error and we send error status
+        if(!itemFromNew) {
+          res.sendStatus(500);
+        }
+
+        if(oldListItems[i].title !== itemFromNew.title || oldListItems[i].description !== itemFromNew.description) {
+          await db.query("UPDATE list_items SET id=$1, list_id=$2, title=$3, description=$4 WHERE id=$5",
+            [itemFromNew.id, id, itemFromNew.title, itemFromNew.description, itemFromNew.id]
+          )
+        }
+      }
+
+      res.sendStatus(200);
+    } catch (error) {
+      res.sendStatus(500);
+    }
   } else {
     res.sendStatus(403);
   }
@@ -211,27 +306,27 @@ passport.use(
   "local",
   new Strategy(async function verify(username, password, cb) {
     try {
-        const result = await db.query("SELECT * FROM users WHERE email = $1 ", [
-          username,
-        ]);
-        if (result.rows.length > 0) {
-          const user = result.rows[0];
-          const storedHashedPassword = user.password_hash;
-          bcrypt.compare(password, storedHashedPassword, (err, valid) => {
-            if (err) {
-              console.error("Error comparing passwords:", err);
-              return cb(err);
+      const result = await db.query("SELECT * FROM users WHERE email = $1 ", [
+        username,
+      ]);
+      if (result.rows.length > 0) {
+        const user = result.rows[0];
+        const storedHashedPassword = user.password_hash;
+        bcrypt.compare(password, storedHashedPassword, (err, valid) => {
+          if (err) {
+            console.error("Error comparing passwords:", err);
+            return cb(err);
+          } else {
+            if (valid) {
+              return cb(null, user);
             } else {
-              if (valid) {
-                return cb(null, user);
-              } else {
-                return cb(null, false);
-              }
+              return cb(null, false);
             }
-          });
-        } else {
-          return cb("User not found");
-        }
+          }
+        });
+      } else {
+        return cb("User not found");
+      }
     } catch (err) {
       console.log(err);
     }
