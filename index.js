@@ -261,15 +261,32 @@ app.delete("/lists/:listId", async (req, res) => {
   if (req.isAuthenticated) {
     try {
       const listId = req.params.listId;
-      await db.query(
-        `DELETE FROM lists WHERE id= $1`,
-        [listId]
-      );
+      await db.query(`DELETE FROM lists WHERE id= $1`, [listId]);
       res.sendStatus(200);
     } catch (error) {
       console.log(error);
       res.sendStatus(500);
     }
+  } else {
+    res.sendStatus(403);
+  }
+});
+
+app.delete("/lists/:listId/:itemId", async (req, res) => {
+  if (req.isAuthenticated) {
+    try {
+      const { listId, itemId } = req.params;
+      const result = await db.query("DELETE FROM list_items WHERE list_id = $1 and id = $2 RETURNING id", [
+        listId,
+        itemId,
+      ]);
+      const deletedId = result.rows[0].id;
+      res.status(200).send(deletedId);
+    } catch (error) {
+      res.sendStatus(500);
+    }
+  } else {
+    req.sendStatus(403);
   }
 });
 
