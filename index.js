@@ -57,7 +57,7 @@ app.get("/lists", async (req, res) => {
       "SELECT * FROM lists WHERE list_owner_id = $1",
       [userId]
     );
-    res.send(usersLists.rows);
+    res.status(200).send(usersLists.rows);
   } else {
     res.sendStatus(403);
   }
@@ -91,6 +91,39 @@ app.get("/lists/:listId", async (req, res) => {
     res.status(200).send(list.rows[0]);
   } else {
     req.sendStatus(403);
+  }
+});
+
+app.get("/friends", async (req, res) => {
+  if (req.isAuthenticated) {
+    const userId = req.user.id;
+    const usersFriends = await db.query(
+      `SElECT friends.id, friends.user_id, friends.friend_id, friends.approved, 
+      users.username AS requesting, requested.username AS requested
+      FROM friends 
+      JOIN users ON friends.user_id = users.id 
+      JOIN users requested ON friends.friend_id = requested.id
+      WHERE user_id = $1 OR friend_id = $1`,
+      [userId]
+    );
+
+    const camelCaseFriendsList = usersFriends.rows.map((friend) => {
+      const camelCaseFriend = {
+        id: friend.id,
+        userId: friend.user_id,
+        friendId: friend.friend_id,
+        approved: friend.approved,
+        requestingUser: friend.requesting,
+        requestedUser: friend.requested,
+        requestingAvatar: friend.requestingavatar,
+        requestedAvatar: friend.requestedavatar
+      };
+      return camelCaseFriend;
+    });
+
+    res.status(200).send(camelCaseFriendsList);
+  } else {
+    res.sendStatus(403);
   }
 });
 
@@ -276,10 +309,10 @@ app.delete("/lists/:listId/:itemId", async (req, res) => {
   if (req.isAuthenticated) {
     try {
       const { listId, itemId } = req.params;
-      const result = await db.query("DELETE FROM list_items WHERE list_id = $1 and id = $2 RETURNING id", [
-        listId,
-        itemId,
-      ]);
+      const result = await db.query(
+        "DELETE FROM list_items WHERE list_id = $1 and id = $2 RETURNING id",
+        [listId, itemId]
+      );
       const deletedId = result.rows[0].id;
       res.status(200).send(deletedId);
     } catch (error) {
@@ -297,9 +330,16 @@ passport.use(
       const result = await db.query("SELECT * FROM users WHERE email = $1 ", [
         username,
       ]);
+
       if (result.rows.length > 0) {
-        const user = result.rows[0];
-        const storedHashedPassword = user.password_hash;
+        const user = {
+          id: result.rows[0].id,
+          email: result.rows[0].email,
+          username: result.rows[0].username,
+        };
+
+        const storedHashedPassword = result.rows[0].password_hash;
+
         bcrypt.compare(password, storedHashedPassword, (err, valid) => {
           if (err) {
             console.error("Error comparing passwords:", err);
