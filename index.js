@@ -146,30 +146,40 @@ app.post("/register", async (req, res) => {
   const password = req.body.password;
 
   try {
-    const checkResult = await db.query("SELECT * FROM users WHERE email = $1", [
-      email,
-    ]);
+    const checkEmailResult = await db.query("SELECT * FROM users WHERE email = $1", [email]);
 
-    if (checkResult.rows.length > 0) {
+    if (checkEmailResult.rows.length > 0) {
       res.status(400).send("Email already exists, try loggin in.");
     } else {
-      // hash and salt the password then save to db
-      bcrypt.hash(password, saltRounds, async (err, hash) => {
-        if (err) {
-          console.error("Error hashing password: ", err);
+      try {
+        const checkUsernameResult = await db.query("SELECT * FROM users WHERE username = $1", [username]);
+        if (checkUsernameResult.rows.length > 0) {
+          res.status(400).send("That username is taken, please choose another.");
         } else {
-          console.log(`Hashed password: ${hash}`);
-          const result = await db.query(
-            "INSERT INTO users (email, username, password_hash) VALUES ($1, $2, $3) RETURNING *",
-            [email, username, hash]
-          );
-          const user = result.rows[0];
-          req.login(user, (err) => {
-            console.log(err);
-            res.send(user);
+          // hash and salt the password then save to db
+          bcrypt.hash(password, saltRounds, async (err, hash) => {
+            if (err) {
+              console.error("Error hashing password: ", err);
+            } else {
+              try {
+                const result = await db.query(
+                  "INSERT INTO users (email, username, password_hash) VALUES ($1, $2, $3) RETURNING *",
+                  [email, username, hash]
+                );
+                const user = result.rows[0];
+                req.login(user, (err) => {
+                  console.log(err);
+                  res.send(user);
+                });
+              } catch (error) {
+                res.send({ error: error }).status(500);
+              }
+            }
           });
         }
-      });
+      } catch (error) {
+        res.send({ error: error }).status(500);
+      }
     }
   } catch (error) {
     res.send({ error: error }).status(500);
@@ -212,6 +222,41 @@ app.post("/lists", (req, res) => {
     res.sendStatus(403);
   }
 });
+
+app.post("/friends", async (req, res) => {
+  if(req.isAuthenticated) {
+    const requestData = req.body;
+    const requestAction = requestData.action;
+    const requestId = requestData.requestId;
+    switch (requestAction) {
+      case "cancel":
+        try {
+          await db.query("DELETE FROM friends WHERE id=$1", [requestId]);
+          res.sendStatus(200)
+        } catch (error) {
+          console.log(`error canceling`);
+        }
+      case "approve":
+        try {
+          console.log("approve");
+        } catch (error) {
+          console.log(`error approving`);
+        }
+      case "deny":
+        try {
+          console.log("deny");
+        } catch (error) {
+          console.log(`error denying`);
+        }
+      default:
+        console.log(`Error finding proper action.`);
+        break;
+    }
+    res.sendStatus(200);
+  } else {
+    res.sendStatus(403);
+  }
+})
 
 app.put("/lists", async (req, res) => {
   if (req.isAuthenticated()) {
