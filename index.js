@@ -116,12 +116,30 @@ app.get("/friends", async (req, res) => {
         requestingUser: friend.requesting,
         requestedUser: friend.requested,
         requestingAvatar: friend.requestingavatar,
-        requestedAvatar: friend.requestedavatar
+        requestedAvatar: friend.requestedavatar,
       };
       return camelCaseFriend;
     });
-
+    console.log(camelCaseFriendsList);
     res.status(200).send(camelCaseFriendsList);
+  } else {
+    res.sendStatus(403);
+  }
+});
+
+app.get("/friends/search/:searchInput", async (req, res) => {
+  if (req.isAuthenticated) {
+    try {
+      const input = req.params.searchInput;
+      const searchInput = input.toLowerCase();
+      const searchResults = await db.query(
+        `SELECT (id), (email), (username) FROM users WHERE lower(username) LIKE '${searchInput}%'`);
+      res.status(200).send(searchResults.rows);
+    } catch (error) {
+      console.log(error);
+      res.sendStatus(500);
+    }
+    
   } else {
     res.sendStatus(403);
   }
@@ -146,15 +164,23 @@ app.post("/register", async (req, res) => {
   const password = req.body.password;
 
   try {
-    const checkEmailResult = await db.query("SELECT * FROM users WHERE email = $1", [email]);
+    const checkEmailResult = await db.query(
+      "SELECT * FROM users WHERE email = $1",
+      [email]
+    );
 
     if (checkEmailResult.rows.length > 0) {
       res.status(400).send("Email already exists, try loggin in.");
     } else {
       try {
-        const checkUsernameResult = await db.query("SELECT * FROM users WHERE username = $1", [username]);
+        const checkUsernameResult = await db.query(
+          "SELECT * FROM users WHERE username = $1",
+          [username]
+        );
         if (checkUsernameResult.rows.length > 0) {
-          res.status(400).send("That username is taken, please choose another.");
+          res
+            .status(400)
+            .send("That username is taken, please choose another.");
         } else {
           // hash and salt the password then save to db
           bcrypt.hash(password, saltRounds, async (err, hash) => {
@@ -224,39 +250,44 @@ app.post("/lists", (req, res) => {
 });
 
 app.post("/friends", async (req, res) => {
-  if(req.isAuthenticated) {
+  if (req.isAuthenticated) {
     const requestData = req.body;
-    const requestAction = requestData.action;
-    const requestId = requestData.requestId;
-    switch (requestAction) {
-      case "cancel":
-        try {
-          await db.query("DELETE FROM friends WHERE id=$1", [requestId]);
-          res.sendStatus(200)
-        } catch (error) {
-          console.log(`error canceling`);
-        }
-      case "approve":
-        try {
-          console.log("approve");
-        } catch (error) {
-          console.log(`error approving`);
-        }
-      case "deny":
-        try {
-          console.log("deny");
-        } catch (error) {
-          console.log(`error denying`);
-        }
-      default:
-        console.log(`Error finding proper action.`);
-        break;
-    }
+
     res.sendStatus(200);
   } else {
     res.sendStatus(403);
   }
-})
+});
+
+app.post("/friends/request", async (req, res) => {
+  if (req.isAuthenticated) {
+    try {
+      const userId = req.user.id;
+      const newRequestId = req.body.id;
+      const requestedUserId = req.body.userId;
+      const newRequestData = await db.query(
+        "INSERT INTO friends (id, user_id, friend_id, approved) VALUES ($1, $2, $3, $4) RETURNING *",
+        [newRequestId, userId, requestedUserId, 'FALSE']
+      );
+
+      const newRequest = newRequestData.rows[0];
+
+      const formattedNewRequest = {
+        id: newRequest.id,
+        userId: newRequest.user_id,
+        friendId: newRequest.friend_id,
+        approved: newRequest.approved
+      }
+
+      res.status(200).send(formattedNewRequest);
+    } catch (error) {
+      console.log(error);
+      res.sendStatus(500);
+    }
+  } else {
+    res.sendStatus(403);
+  }
+});
 
 app.put("/lists", async (req, res) => {
   if (req.isAuthenticated()) {
@@ -335,6 +366,28 @@ app.put("/lists", async (req, res) => {
   }
 });
 
+app.patch("/friends/approve/:requestId", async (req, res) => {
+  if (req.isAuthenticated) {
+    const requestId = req.params.requestId;
+    try {
+      const approvedData = await db.query("UPDATE friends SET approved=TRUE WHERE id=$1 RETURNING *", [
+        requestId,
+      ]);
+      const formattedApprovedData = {
+        id: approvedData.id,
+        userId: approvedData.user_id,
+        friendId: approvedData.friend_id,
+        approved: approved
+      }
+      res.status(200).send(formattedApprovedData);
+    } catch (error) {
+      res.sendStatus(500);
+    }
+  } else {
+    res.sendStatus(403);
+  }
+});
+
 app.delete("/lists/:listId", async (req, res) => {
   if (req.isAuthenticated) {
     try {
@@ -365,6 +418,20 @@ app.delete("/lists/:listId/:itemId", async (req, res) => {
     }
   } else {
     req.sendStatus(403);
+  }
+});
+
+app.delete("/friends/:requestId", async (req, res) => {
+  if (req.isAuthenticated) {
+    const requestId = req.params.requestId;
+    try {
+      await db.query("DELETE FROM friends WHERE id=$1", [requestId]);
+      res.sendStatus(200);
+    } catch (error) {
+      console.log(`error deleting: ${error}`);
+    }
+  } else {
+    res.sendStatus(403);
   }
 });
 
